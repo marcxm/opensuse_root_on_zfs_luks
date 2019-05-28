@@ -1,0 +1,59 @@
+# sda4 is our new ZFS on LUKS.
+
+1. cryptsetup -y --cipher aes-cbc-essiv:sha256 --key-size 256 luksFormat /dev/sda4
+2. cryptsetup luksOpen /dev/disk/by-uuid/8f5f4538-23ae-451d-a89e-ca92fc2076d3 cr_sda4
+3. zypper ar http://download.opensuse.org/repositories/home:/brassh:/branches:/filesystems/openSUSE_Leap_15.1/ zfs
+4. zypper in zfs zfs-kmp-default
+5. /etc/modules.d/zfs.conf:
+
+#load zfs module at boot time
+zfs
+
+6. zpool create -o ashift=12 -O atime=off -O canmount=off -O compression=lz4 -O normalization=formD -O mountpoint=/ -R /tmp/mnt rpool /dev/mapper/cr_sda4
+7. zfs create -o canmount=off -o mountpoint=none rpool/ROOT
+8. zfs create -o canmount=noauto -o mountpoint=/ rpool/ROOT/opensuse
+9. zfs mount rpool/ROOT/opensuse
+10. zfs set devices=off rpool
+11. cp -ax /mnt/sysbackup/. /tmp/mnt/.
+12. chroot to the environment:
+
+chroot.sh:
+
+SYSDIR=/tmp/mnt/
+
+cd $SYSDIR
+mount -t proc proc $SYSDIR/proc/
+mount --rbind /sys $SYSDIR/sys/
+mount --rbind /dev $SYSDIR/dev/
+chroot $SYSDIR /bin/bash
+
+13. /etc/crypttab:
+
+cr_sda4 /dev/disk/by-uuid/8f5f4538-23ae-451d-a89e-ca92fc2076d3 /root/luks.key luks,discard,initramfs
+
+[this comes from:
+cryptsetup luksAddKey /dev/sda4 /root/luks.key]
+
+14. /etc/fstab - hash-in all RFS-related entries
+15. mcedit /etc/udev/rules.d/99-local-crypt.rules [this fixes cryptsetup naming scheme for ZFS]:
+
+ENV{DM_NAME}!="", SYMLINK+="$env{DM_NAME}"
+ENV{DM_NAME}!="", SYMLINK+="dm-name-$env{DM_NAME}"
+
+16. ln -s /dev/mapper/cr_sda4 /dev/cr_sda4
+17. grub2-probe /
+zfs
+
+18. export ZPOOL_VDEV_NAME_PATH=YES
+19. mkinitrd
+20. /etc/default/grub:
+
+GRUB_CMDLINE_LINUX_DEFAULT="splash=verbose quiet showopts threadirqs mitigations=off rootfstype=zfs
+
+Uncomment: GRUB_TERMINAL=console
+
+21. grub2-mkconfig -o /boot/grub2/grub.cfg
+23. grub2-install /dev/sda
+24. zpool export rpool
+25. reboot
+
